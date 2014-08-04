@@ -23,6 +23,7 @@
  *   Adafruit (NeoPixel Library)
  * 
  * 07 Nov 2013 - initial release
+ * 04 Aug 2014 - Make Colors mix on overlap
  * 
  * */
 
@@ -203,8 +204,18 @@ void clockMode() {
   strip.setPixelColor(pixelCheck(analoghour-1),strip.Color(50, 0, 0));
   strip.setPixelColor(pixelCheck(analoghour),strip.Color(255, 0, 0));
   strip.setPixelColor(pixelCheck(analoghour+1),strip.Color(50, 0, 0));
-  
-  strip.setPixelColor(minute(t),strip.Color(0, 0, 255));
+ 
+  int red = 0;
+  if (minute(t) == analoghour-1) {
+    red = 50;
+  }
+  if (minute(t) == analoghour) {
+    red = 255;
+  }
+  if (minute(t) == analoghour+1) {
+    red = 50;
+  }
+  strip.setPixelColor(minute(t),strip.Color(red, 0, 255));
   
   if (coptionfade) {
     // reset counter
@@ -363,7 +374,9 @@ void serialMessage() {
       //Print diag time
     case 'P': 
       {
-        Serial.println("OK - Ambient light mode. Chill!");
+        Serial.println("Current Time is: ");
+        Serial.print(now(), DEC);
+        Serial.print(' ');
         break;
       } 
 
