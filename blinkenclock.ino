@@ -1,3 +1,4 @@
+
 /*
  * blinkenclock - multiprupose LED wall clock
  * version 0.1 alpha
@@ -199,9 +200,9 @@ void clockMode() {
     }
   }
   
-  strip.setPixelColor(pixelCheck(analoghour-1),strip.Color(70, 0, 0));
+  strip.setPixelColor(pixelCheck(analoghour-1),strip.Color(50, 0, 0));
   strip.setPixelColor(pixelCheck(analoghour),strip.Color(255, 0, 0));
-  strip.setPixelColor(pixelCheck(analoghour+1),strip.Color(70, 0, 0));
+  strip.setPixelColor(pixelCheck(analoghour+1),strip.Color(50, 0, 0));
   
   strip.setPixelColor(minute(t),strip.Color(0, 0, 255));
   
@@ -214,12 +215,57 @@ void clockMode() {
       lastsecond = second();
       counter = 0;  
     }
-    strip.setPixelColor(pixelCheck(second(t)+1),strip.Color(0, counter*10, 0));  
-    strip.setPixelColor(second(t),strip.Color(0, 255-(counter*10), 0));
-    counter++;
+    
+    // if Colors overlap merge them 
+    int blue = 0;
+    if ((second(t)+1) == minute(t)) {
+      blue = 255;
+    }
+    int red = 0;
+    if ((second(t)+1) == analoghour-1) {
+      red = 50;
+    }
+    if ((second(t)+1) == analoghour) {
+      red = 255;
+    }
+    if ((second(t)+1) == analoghour+1) {
+      red = 50;
+    } 
+    strip.setPixelColor(pixelCheck(second(t)+1),strip.Color(red, counter*10, blue));  
+    
+    blue = 0;
+    if (second(t) == minute(t)) {
+      blue = 255;
+    }
+    red = 0;
+    if (second(t) == analoghour-1) {
+      red = 50;
+    }
+    if (second(t) == analoghour) {
+      red = 255;
+    }
+    if (second(t) == analoghour+1) {
+      red = 50;
+    }
+    strip.setPixelColor(second(t),strip.Color(red, 255-(counter*10), blue));
+    counter++; 
   }
   else {
-    strip.setPixelColor(second(t),strip.Color(0, 255, 0));
+    int blue = 0;
+    if (second(t) == minute(t)) {
+      blue = 255;
+    }
+    int red = 0;
+    if (second(t) == analoghour-1) {
+      red = 50;
+    }
+    if (second(t) == analoghour) {
+      red = 255;
+    }
+    if (second(t) == analoghour+1) {
+      red = 50;
+    }
+    strip.setPixelColor(second(t),strip.Color(red, 255, blue));
   }
 }
 
@@ -310,6 +356,13 @@ void serialMessage() {
     case 'L': 
       {
         mode = 3;
+        Serial.println("OK - Ambient light mode. Chill!");
+        break;
+      } 
+       
+      //Print diag time
+    case 'P': 
+      {
         Serial.println("OK - Ambient light mode. Chill!");
         break;
       } 
