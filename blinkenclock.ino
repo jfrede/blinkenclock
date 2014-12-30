@@ -1,11 +1,11 @@
 
 /*
  * blinkenclock - multiprupose LED wall clock
- * version 0.1 alpha
+ * version 1.0
  * Copyright by Bjoern Knorr 2013
- * 
- * http://netaddict.de/blinkenlights:blinkenclock
- * 
+ *
+ * https://github.com/jfrede/blinkenclock
+ *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
@@ -17,26 +17,28 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>. 
- * 
- * credits to 
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ *
+ * credits to
  *   Adafruit (NeoPixel Library)
- * 
+ *
  * 07 Nov 2013 - initial release
  * 04 Aug 2014 - Make Colors mix on overlap
- * 
+ * 29 Dec 2014 - Remove most delay and replaye RTC Library
+ * 30 Dec 2014 - Add Daylight Saving Time
+ *
  * */
 
-#include <Adafruit_NeoPixel.h>
+#include "Adafruit_NeoPixel.h"
 #include <Wire.h>
-#include <Time.h>  
-#include <DS1307RTC.h>
+#include "RTClib.h"
 
 // define something
 #define LED_PIN 6 // LED strip pin
-#define BUTTON_PIN 18 // push button pin number
+#define SQ_PIN 7  // Squarewave pin from RTC
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(60, LED_PIN, NEO_GRB + NEO_KHZ800);
+RTC_DS1307 rtc;
 
 // default mode is clock mode
 uint8_t mode = 0;
@@ -59,16 +61,14 @@ boolean coptionfade = 1;
 // multiprupose counter
 int counter = 0;
 
-// alert counter
-int alertcounter = 0;
+// Daylight Saving Time
+int dst = 0;
 
 // redraw flag
 boolean redraw = 1;
 
 // time cache
 unsigned long currenttime = 0;
-unsigned long lasttime = 0;
-unsigned long alerttime = 0;
 
 // last second
 uint8_t lastsecond = 0;
@@ -79,104 +79,68 @@ uint32_t color_ambient;
 // initialize everything
 void setup() {
   Serial.begin(9600);
-  setSyncProvider(RTC.get);
-  setSyncInterval(1);
   strip.begin();
   strip.show();
-  lasttime = millis();
-  currenttime = millis();
-  lastsecond = second();
+#ifdef AVR
+  Wire.begin();
+#else
+  Wire1.begin(); // Shield I2C pins connect to alt I2C bus on Arduino Due
+#endif
+  rtc.begin();
+  if (! rtc.isrunning()) {
+    Serial.println("RTC is NOT running!");
+    // following line sets the RTC to the date & time this sketch was compiled
+    // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    // This line sets the RTC with an explicit date & time, for example to set
+    // January 21, 2014 at 3am you would call:
+    // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+  }
+  pinMode(SQ_PIN, INPUT);
+  rtc.writeSqwPinMode(SquareWave1HZ);
+  DateTime now = rtc.now();
+  lastsecond = now.second();
+  DaylightSavingTime();
   color_ambient = strip.Color(0, 180, 255);
-  pinMode(A0, INPUT);
-  pinMode(BUTTON_PIN, INPUT);
-  digitalWrite(BUTTON_PIN, HIGH);
-  delay(20);
 }
 
 // main loop
-void loop() {  
-
-  // timing
-  currenttime = millis();
-
-  // check for button
-  if(digitalRead(BUTTON_PIN) == LOW) {
-    mode++;
-    if (mode>3) {
-      mode = 0;  
-    }
-    delay(250);
-  }
+void loop() {
 
   // if enough serial data available, process it
-  if(Serial.available()) {
+  if (Serial.available()) {
     serialMessage();
   }
-  
+
   // select mode and show blinken pixelz!
   // show clock
-  if (mode==0) {
-    if(currenttime - lasttime > 45) {
-      clockMode();
-      redraw = 1;
-      lasttime = currenttime;
-    }
+  if (mode == 0) {
+    clockMode();
+    redraw = 1;
   }
 
   // demo mode - show rgb cycle
-  else if (mode==1) {
-    if(currenttime - lasttime > 50) {
-      
-        // reset counter
-      if (counter >= 256) {
-        counter = 0;
-      }
-    
-      for(uint16_t i=0; i< strip.numPixels(); i++) {
-        strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + counter) & 255));
-      }
-      redraw = 1;
-      counter++;
-      lasttime = currenttime;
+  else if (mode == 1) {
+
+
+    // reset counter
+    if (counter >= 256) {
+      counter = 0;
     }
+
+    for (uint16_t i = 0; i < strip.numPixels(); i++) {
+      strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + counter) & 255));
+    }
+    redraw = 1;
+    counter++;
   }
 
-  // music mode
-  else if (mode==2) {
-    if(currenttime - lasttime > 5) {
-      int sensorvalue = map(analogRead(A0), 300, 900, 0, 255);
-      if (sensorvalue<0) {
-        sensorvalue = 0;
-      }
-      lightPixels(strip.Color(1*sensorvalue, 1*sensorvalue, 1*sensorvalue));
-      redraw = 1;
-      lasttime = currenttime;
-    }
-  }
-  
-  else if (mode==3) {
+  else if (mode == 3) {
     lightPixels(color_ambient);
     redraw = 1;
   }
-  
-  // alert - overrides everything
-  if (alert && (currenttime - alerttime > 20)) {
-    if (alertcounter > 59) {
-      alertcounter = 0;  
-    }
-    alertcounter++;
-    redraw = 1;
-    alerttime = millis();
-  }
-  if (alert==1) {
-    drawCycle(alertcounter, strip.Color(25, 20, 0));
-  }
-  if (alert==2) {
-    drawCycle(alertcounter, strip.Color(25, 0, 0));
-  }
-    
+
   // redraw if needed
-  if(redraw) {
+  if (redraw) {
     strip.show();
     redraw = 0;
   }
@@ -184,106 +148,117 @@ void loop() {
 
 // clock mode
 void clockMode() {
-  time_t t = now();
-  uint8_t analoghour = hour(t);
-  uint8_t currentsecond = second(t);
-  
-  if (analoghour > 12) {
-    analoghour=(analoghour-12);
-  }
-  analoghour = analoghour*5+(minute(t)/12);
+  DateTime now = rtc.now();
+  uint8_t analoghour = now.hour();
+  uint8_t currentsecond = now.second();
 
-  lightPixels(strip.Color(2, 2, 2));
-  
+  if (((now.hour() == 2) || (now.hour() == 3)) && now.minute() == 0 &&  now.second() == 0) {
+    DaylightSavingTime();
+  }
+
+  if (analoghour + dst > 12) {
+    analoghour = (analoghour + dst - 12);
+  }
+  analoghour = analoghour * 5 + (now.minute() / 12);
+
+  lightPixels(strip.Color(1, 1, 1));
+
   if (coptionfivemin) {
-    for (uint8_t i=0; i<60; i += 5) {
-      strip.setPixelColor(i,strip.Color(10, 10, 10));
+    for (uint8_t i = 0; i < 60; i += 5) {
+      strip.setPixelColor(i, strip.Color(15, 15, 15));
     }
   }
-  
-  strip.setPixelColor(pixelCheck(analoghour-1),strip.Color(50, 0, 0));
-  strip.setPixelColor(pixelCheck(analoghour),strip.Color(255, 0, 0));
-  strip.setPixelColor(pixelCheck(analoghour+1),strip.Color(50, 0, 0));
- 
-  int red = 0;
-  if (minute(t) == analoghour-1) {
+
+  strip.setPixelColor(pixelCheck(analoghour - 1), strip.Color(50, 1, 1));
+  strip.setPixelColor(pixelCheck(analoghour), strip.Color(255, 1, 1));
+  strip.setPixelColor(pixelCheck(analoghour + 1), strip.Color(50, 1, 1));
+
+  int red = 1;
+  if (now.minute() == analoghour - 1) {
     red = 50;
   }
-  if (minute(t) == analoghour) {
+  if (now.minute() == analoghour) {
     red = 255;
   }
-  if (minute(t) == analoghour+1) {
+  if (now.minute() == analoghour + 1) {
     red = 50;
   }
-  strip.setPixelColor(minute(t),strip.Color(red, 0, 255));
-  
-  if (coptionfade) {
-    // reset counter
-    if(counter>25) {
-      counter = 0;
-    }
-    else if (lastsecond != currentsecond) {
-      lastsecond = second();
-      counter = 0;  
-    }
-    
-    // if Colors overlap merge them 
-    int blue = 0;
-    if ((second(t)+1) == minute(t)) {
-      blue = 255;
-    }
-    int red = 0;
-    if ((second(t)+1) == analoghour-1) {
-      red = 50;
-    }
-    if ((second(t)+1) == analoghour) {
-      red = 255;
-    }
-    if ((second(t)+1) == analoghour+1) {
-      red = 50;
-    } 
-    strip.setPixelColor(pixelCheck(second(t)+1),strip.Color(red, counter*10, blue));  
-    
-    blue = 0;
-    if (second(t) == minute(t)) {
-      blue = 255;
-    }
-    red = 0;
-    if (second(t) == analoghour-1) {
-      red = 50;
-    }
-    if (second(t) == analoghour) {
-      red = 255;
-    }
-    if (second(t) == analoghour+1) {
-      red = 50;
-    }
-    strip.setPixelColor(second(t),strip.Color(red, 255-(counter*10), blue));
-    counter++; 
+  strip.setPixelColor(now.minute(), strip.Color(red, 1, 255));
+
+  // reset counter
+  if (counter > 255) {
+    counter = 0;
   }
-  else {
-    int blue = 0;
-    if (second(t) == minute(t)) {
-      blue = 255;
+  else if (lastsecond != currentsecond) {
+    lastsecond = now.second();
+    counter = 5;
+  }
+
+  red = 1 ;                               // Init color variables
+  int green = counter;
+  int blue = 1;
+
+  if (((now.second() + 1) % 5) == 0) {   // make sure 5 Minute is brighter
+    blue = 15;
+    red = 15;
+    if (( 15 + green ) <= 255 ) {
+      green = green + 15;
     }
-    int red = 0;
-    if (second(t) == analoghour-1) {
-      red = 50;
+    else {
+      green = 255;
     }
-    if (second(t) == analoghour) {
-      red = 255;
+  }
+  if ((now.second() + 1) == now.minute()) {     // when second +1  is on minute
+    blue = 255;
+  }
+  if ((now.second() + 1) == analoghour - 1) {   // when second +1  is on hour
+    red = 50;
+  }
+  if ((now.second() + 1) == analoghour) {
+    red = 255;
+  }
+  if ((now.second() + 1) == analoghour + 1) {
+    red = 50;
+  }
+
+  strip.setPixelColor(pixelCheck(now.second() + 1), strip.Color(red, green, blue));    // update +1 Second on LED stripe
+
+  blue = 1;                             // all color variables back to start
+  red = 1;
+  green = 255 - counter;
+
+  if ((now.second() % 5) == 0) {        // make sure 5 Minute is brighter
+    blue = 15;
+    red = 15;
+    if (( 15 + green ) <= 255 ) {
+      green = green + 15;
     }
-    if (second(t) == analoghour+1) {
-      red = 50;
+    else {
+      green = 255;
     }
-    strip.setPixelColor(second(t),strip.Color(red, 255, blue));
+  }
+  if (now.second() == now.minute()) {         // when second +1  is on minute
+    blue = 255 ;
+  }
+  if (now.second() == analoghour - 1) {       // when second +1  is on hour
+    red = 50;
+  }
+  if (now.second() == analoghour) {
+    red = 255;
+  }
+  if (now.second() == analoghour + 1) {
+    red = 50;
+  }
+  strip.setPixelColor(now.second(), strip.Color(red, green, blue));
+  if (counter <= 254) {
+    counter++;
   }
 }
 
 // cycle mode
 void drawCycle(int i, uint32_t c) {
-  for(uint8_t ii=5; ii>0; ii--) {
-    strip.setPixelColor(pixelCheck(i-ii),c);
+  for (uint8_t ii = 5; ii > 0; ii--) {
+    strip.setPixelColor(pixelCheck(i - ii), c);
   }
 }
 
@@ -291,144 +266,47 @@ void drawCycle(int i, uint32_t c) {
 void progressBar(int i) {
   map(i, 0, 100, 0, 59);
   lightPixels(strip.Color(0, 0, 0));
-  for (uint8_t ii=0; ii<i; ii++) {
-    strip.setPixelColor(ii,strip.Color(5, 0, 5));
+  for (uint8_t ii = 0; ii < i; ii++) {
+    strip.setPixelColor(ii, strip.Color(5, 0, 5));
   }
 }
 
 // light all pixels with given values
 void lightPixels(uint32_t c) {
-  for (uint8_t i=0; i<strip.numPixels(); i++) {
-    strip.setPixelColor(i,c);
+  for (uint8_t i = 0; i < strip.numPixels(); i++) {
+    strip.setPixelColor(i, c);
   }
 }
 
 // set the correct pixels
 int pixelCheck(int i) {
-  if (i>59) {
+  if (i > 59) {
     i = i - 60;
   }
-  if (i<0) {
-    i = i +60;
+  if (i < 0) {
+    i = i + 60;
   }
   return i;
 }
 
 void serialMessage() {
-  if(Serial.available()){
-    char sw = Serial.read(); 
+  if (Serial.available()) {
+    char sw = Serial.read();
     switch (sw) {
 
-      // set time
-    case 'T': 
-      {
-        delay(50);
-        time_t pctime = 0;
-        while(Serial.available() >=  10 ){       
-          for(int i=0; i < 10; i++){   
-            char c = Serial.read();    
-            Serial.print("x");       
-            if( c >= '0' && c <= '9'){   
-              pctime = (10 * pctime) + (c - '0');    
-            }
-          }   
+      case 'D':   //demo mode (shows rgb cycle)
+        {
+          mode = 1;
+          Serial.println("OK - Demo mode.");
+          break;
         }
-        setTime(pctime);
-        RTC.set(pctime);
-        Serial.println("OK - Time set");
-        break;
-      }
 
-      //demo mode (shows rgb cycle)
-    case 'D': 
-      {
-        mode = 1;
-        Serial.println("OK - Demo mode.");
-        break;
-      }
-
-      //clock mode (shows time)
-    case 'C': 
-      {
-        mode = 0;
-        Serial.println("OK - Clock mode.");
-        break;
-      }
-
-      //music mode (clock shows bouncing colors)
-    case 'M': 
-      {
-        mode = 2;
-        Serial.println("OK - Music mode. Turn up the volume!11");
-        break;
-      }
-
-      //ambient mode (clock shows defined color)
-    case 'L': 
-      {
-        mode = 3;
-        Serial.println("OK - Ambient light mode. Chill!");
-        break;
-      } 
-       
-      //Print diag time
-    case 'P': 
-      {
-        Serial.println("Current Time is: ");
-        Serial.print(now(), DEC);
-        Serial.print(' ');
-        break;
-      } 
-
-      //alert mode - green alert (clock flashes orange)
-    case 'G': 
-      {
-        alert = 0;
-        Serial.println("OK - Green Alert.");
-        break;
-      }
-
-      //alert mode - orange alert (clock flashes orange)
-    case 'O': 
-      {
-        alert = 1;
-        Serial.println("OK - Orange Alert.");
-        break;
-      }
-
-      //alert mode - red alert (clock flashes red)
-    case 'R': 
-      {
-        alert = 2;
-        Serial.println("OK - Red Alert - Shields up! Arm the phasers!");
-        break;
-      }
-      
-       //clock option five minute dots
-    case '5': 
-      {
-        if (coptionfivemin) {
-          coptionfivemin = 0;  
+      case 'C': //clock mode (shows time)
+        {
+          mode = 0;
+          Serial.println("OK - Clock mode.");
+          break;
         }
-        else {
-          coptionfivemin = 1;  
-        }
-        Serial.println("OK - Tongled clock five minute dots.");
-        break;
-      } 
-      
-       //clock option fade seconds
-    case 'F': 
-      {
-        if (coptionfade) {
-          coptionfade = 0;  
-        }
-        else {
-          coptionfade = 1;  
-        }
-        Serial.println("OK - Tongled clock fade mode.");
-        break;
-      }
     }
   }
 }
@@ -436,15 +314,49 @@ void serialMessage() {
 // Input a value 0 to 255 to get a color value.
 // The colours are a transition r - g - b - back to r.
 uint32_t Wheel(byte WheelPos) {
-  if(WheelPos < 85) {
+  if (WheelPos < 85) {
     return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
-  } 
-  else if(WheelPos < 170) {
+  }
+  else if (WheelPos < 170) {
     WheelPos -= 85;
     return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
-  } 
+  }
   else {
     WheelPos -= 170;
     return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+  }
+}
+
+/******************************************************************************************/
+/***  Determine the Daylight Saving Time DST. In Germany it is the last Sunday in March and in October  ***/
+/***  In March at 2:00am the time will be turned forward to 3:00am and in  ***/
+/***  October at 3:00am it will be turned back to 2:00am and repeated as 2A and 2B  ***/
+/******************************************************************************************/
+void DaylightSavingTime() {
+  DateTime now = rtc.now();
+  /***    Generally checking the full month and determine the DST flag is an easy job  ***/
+  if ( now.month() <= 2 || now.month() >= 11) {
+    dst = 0;                                   // Winter months
+  }
+  if (now.month() >= 4 && now.month() <= 9) {
+    dst = 1;                                    // Summer months
+  }
+  if ((now.month() == 3) && (now.day() - now.dayOfWeek() >= 25)) {
+    if (now.hour() >= 3 - 1) { // MESZ – 1 hour
+      dst = 1;
+    }
+  }
+  /***  Still summer months time DST beginning of October, so easy to determine  ***/
+  if (now.month() == 10 && now.day() - now.dayOfWeek() < 25) {
+    dst = 1;    // Summer months anyway until 24th of October
+  }
+  /***  Test the begin of the winter time in October and set DST = 0  ***/
+  if (now.month() == 10 && now.day() - now.dayOfWeek() >= 25) {     // Test the begin of the winter time
+    if (now.hour() >= 3 - 1) { // -1 since the RTC is running in GMT+1 only
+      dst = 0;
+    }
+    else {
+      dst = 1;
+    }
   }
 }
