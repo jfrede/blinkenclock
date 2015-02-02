@@ -27,10 +27,11 @@
  * 29 Dec 2014 - Remove most delay and replaye RTC Library
  * 30 Dec 2014 - Add Daylight Saving Time
  * 16 Jan 2015 - Use SQ Pin on RTC to detect new second
- *
- * todo: Minute 59 does not mix corecctly with Second -1
- *       Mix problems Hour around 0 with Second
- *       Fancy animation for Noon and Midnight
+ * 16 Jan 2015 - Fix some Problems calculating with unit8 valus
+ * 02 Feb 2015 - Final check mixing around 0
+
+ * todo: Fancy animation for Noon and Midnight
+ *       Make set RTC working on non initiated RTC
  *
  * */
 
@@ -64,8 +65,11 @@ uint8_t blue = 0;
 
 // init Clock Variables
 uint8_t analoghour = 0;
+uint8_t lastanaloghour = 0;
+uint8_t nextanaloghour = 0;
 uint8_t analogminute = 0;
 uint8_t analogsecond = 0;
+uint8_t lastanalogsecond = 0;
 
 // redraw flag
 boolean redraw = 1;
@@ -87,7 +91,7 @@ DateTime now;
 void setup() {
   Serial.begin(9600);
   strip.begin();
-  strip.setBrightness(200);
+  strip.setBrightness(200);       // Dimmer 
   strip.show();
   Wire.begin();
   rtc.begin();
@@ -153,6 +157,7 @@ void clockMode() {
     analoghour = now.hour();
     analogminute = now.minute();
     analogsecond = now.second();
+    lastanalogsecond = pixelCheck(analogsecond - 1);
 
     if (((analoghour == 2) || (analoghour == 3)) && analogminute == 0 &&  analogsecond == 0) {
       DaylightSavingTime();
@@ -163,7 +168,10 @@ void clockMode() {
     }
 
     analoghour = analoghour * 5 + (analogminute / 12);
-
+    
+    lastanaloghour = pixelCheck(analoghour - 1);
+    nextanaloghour = pixelCheck(analoghour + 1);
+    
     lastState = 0;
   }
   else if (sqState == 1) {
@@ -197,19 +205,19 @@ void clockMode() {
     }
   }
 
-  strip.setPixelColor(pixelCheck(analoghour - 1), strip.Color(50, 0, 0));
-  strip.setPixelColor(pixelCheck(analoghour), strip.Color(255, 0, 0));
-  strip.setPixelColor(pixelCheck(analoghour + 1), strip.Color(50, 0, 0));
+  strip.setPixelColor(lastanaloghour, strip.Color(50, 0, 0));
+  strip.setPixelColor(analoghour, strip.Color(255, 0, 0));
+  strip.setPixelColor(nextanaloghour, strip.Color(50, 0, 0));
 
   red = 0;
 
-  if (analogminute == analoghour - 1) {
+  if (analogminute == lastanaloghour) {
     red = 50;
   }
   if (analogminute == analoghour) {
     red = 255;
   }
-  if (analogminute == analoghour + 1) {
+  if (analogminute == nextanaloghour) {
     red = 50;
   }
 
@@ -232,13 +240,13 @@ void clockMode() {
   if (analogsecond == analogminute) {     // when second is on minute
     blue = 255;
   }
-  if (analogsecond == analoghour - 1) {   // when second is on hour
+  if (analogsecond == lastanaloghour) {   // when second is on hour
     red = 50;
   }
   if (analogsecond == analoghour) {
     red = 255;
   }
-  if (analogsecond == analoghour + 1) {
+  if (analogsecond == nextanaloghour) {
     red = 50;
   }
 
@@ -258,20 +266,20 @@ void clockMode() {
       green = 255;
     }
   }
-  if ((analogsecond - 1) == analogminute) {         // when second -1  is on minute
+  if (lastanalogsecond == analogminute) {         // when second -1  is on minute
     blue = 255 ;
   }
-  if ((analogsecond - 1) == analoghour - 1) {       // when second -1  is on hour
+  if (lastanalogsecond == lastanaloghour) {       // when second -1  is on hour
     red = 50;
   }
-  if ((analogsecond - 1) == analoghour) {
+  if (lastanalogsecond == analoghour) {
     red = 255;
   }
-  if ((analogsecond - 1) == analoghour + 1) {
+  if (lastanalogsecond == nextanaloghour) {
     red = 50;
   }
 
-  strip.setPixelColor(pixelCheck(analogsecond - 1), strip.Color(red, green, blue));  //update -1 Second on LED stripe
+  strip.setPixelColor(lastanalogsecond, strip.Color(red, green, blue));  //update lastSecond on LED stripe
 }
 
 // cycle mode
@@ -298,12 +306,12 @@ void lightPixels(uint32_t c) {
 }
 
 // set the correct pixels
-int pixelCheck(int i) {
-  if (i > 59) {
-    i = i - 60;
+uint8_t pixelCheck(uint8_t i) {
+  if (i >= 200) {
+    i = 60 - (256 - i) ; 
   }
-  if (i < 0) {
-    i = i + 60;
+  if (i >= 60) {
+    i = i - 60;
   }
   return i;
 }
