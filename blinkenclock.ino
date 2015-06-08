@@ -29,6 +29,8 @@
  * 16 Jan 2015 - Use SQ Pin on RTC to detect new second
  * 16 Jan 2015 - Fix some Problems calculating with unit8 valus
  * 02 Feb 2015 - Final check mixing around 0
+ * 06 Jun 2015 - Change Set Clock 
+ * 07 Jun 2015 - Reimplement Alarm
 
  * todo: Fancy animation for Noon and Midnight
  *       Make set RTC working on non initiated RTC
@@ -54,6 +56,7 @@ uint8_t mode = 0;
 
 //  fader_count
 uint8_t fader_count = 0;
+uint8_t alert_count = 0;
 
 // Daylight Saving Time
 uint8_t  dst = 0;
@@ -77,12 +80,11 @@ boolean redraw = 1;
 // last second
 uint8_t lastsecond = 0;
 
-// strip color (ambient)
-uint32_t color_ambient;
-
 // sqwarewave State
 boolean sqState = 0;
 boolean lastState = 1;
+
+uint8_t alert = 0;
 
 // Init global Date
 DateTime now;
@@ -91,22 +93,27 @@ DateTime now;
 void setup() {
   Serial.begin(9600);
   strip.begin();
-  strip.setBrightness(200);       // Dimmer 
+  strip.setBrightness(192);       // Dimmer
   strip.show();
   Wire.begin();
   rtc.begin();
   if (! rtc.isrunning()) {
     Serial.println("RTC is NOT running!");
-    // following line sets the RTC to the date & time this sketch was compiled
-    // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));    //FIXME This seems not to work
   }
+
+  boolean setTime = 1;
+
+  if ( setTime == 1 ) {
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    Serial.println(DateTime(F(__DATE__), F(__TIME__)));
+  }
+  
   pinMode(SQ_PIN, INPUT);
   rtc.writeSqwPinMode(SquareWave1HZ);   // Set SQ to 1HZ
   now = rtc.now();
   DaylightSavingTime();                 // have we DaylightSavingTime?
-  pinMode(SQ_PIN, INPUT);          
+  pinMode(SQ_PIN, INPUT);
 
-  color_ambient = strip.Color(0, 180, 255);
 }
 
 // main loop
@@ -134,9 +141,12 @@ void loop() {
     fader_count++;
   }
 
-  else if (mode == 3) {
-    lightPixels(color_ambient);
-    redraw = 1;
+  // alert - overrides everything
+  if (alert == 1) {
+    drawCycle((fader_count/4.25), strip.Color(255, 255, 0));
+  }
+  if (alert == 2) {
+    drawCycle((fader_count/4.25), strip.Color(255, 0, 0));
   }
 
   // redraw if needed
@@ -144,6 +154,7 @@ void loop() {
     strip.show();
     redraw = 0;
   }
+  delay(1);
 }
 
 // clock mode
@@ -163,15 +174,13 @@ void clockMode() {
       DaylightSavingTime();
     }
 
-    if ((analoghour + dst) > 12) {
-      analoghour = ((analoghour + dst) % 12);
-    }
-
+    //analoghour = ((analoghour + dst) % 12);
+    analoghour = ((analoghour) % 12);
     analoghour = analoghour * 5 + (analogminute / 12);
-    
+
     lastanaloghour = pixelCheck(analoghour - 1);
     nextanaloghour = pixelCheck(analoghour + 1);
-    
+
     lastState = 0;
   }
   else if (sqState == 1) {
@@ -308,7 +317,7 @@ void lightPixels(uint32_t c) {
 // set the correct pixels
 uint8_t pixelCheck(uint8_t i) {
   if (i >= 200) {
-    i = 60 - (256 - i) ; 
+    i = 60 - (256 - i) ;
   }
   if (i >= 60) {
     i = i - 60;
@@ -322,16 +331,46 @@ void serialMessage() {
     switch (sw) {
       //demo mode (shows rgb cycle)
       case 'D': {
-        mode = 1;
-        Serial.println("OK - Demo mode.");
-        break;
-      }
+          mode = 1;
+          Serial.println("OK - Demo mode.");
+          break;
+        }
       //clock mode (shows time)
       case 'C': {
-        mode = 0;
-        Serial.println("OK - Clock mode.");
-        break;
-      }
+          mode = 0;
+          Serial.println("OK - Clock mode.");
+          break;
+        }
+      //alert mode - green alert (clock flashes orange)
+      case 'G':
+        {
+          alert = 0;
+          Serial.println("OK - Green Alert.");
+          break;
+        }
+
+      //alert mode - orange alert (clock flashes orange)
+      case 'O':
+        {
+          alert = 1;
+          Serial.println("OK - Orange Alert.");
+          break;
+        }
+
+      //alert mode - red alert (clock flashes red)
+      case 'R':
+        {
+          alert = 2;
+          Serial.println("OK - Red Alert - Shields up! Arm the phasers!");
+          break;
+        }
+      //ambient mode (clock shows defined color)
+      case 'A':
+        {
+          mode = 3;
+          Serial.println("OK - Ambient light mode. Chill!");
+          break;
+        }
     }
   }
 }
