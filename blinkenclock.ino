@@ -29,8 +29,9 @@
  * 16 Jan 2015 - Use SQ Pin on RTC to detect new second
  * 16 Jan 2015 - Fix some Problems calculating with unit8 valus
  * 02 Feb 2015 - Final check mixing around 0
- * 06 Jun 2015 - Change Set Clock 
+ * 06 Jun 2015 - Change Set Clock
  * 07 Jun 2015 - Reimplement Alarm
+ * 20 Sep 2015 - Use DS3232RTC
 
  * todo: Fancy animation for Noon and Midnight
  *       Make set RTC working on non initiated RTC
@@ -38,8 +39,9 @@
  * */
 
 #include "Adafruit_NeoPixel.h"
-#include <Wire.h>
-#include "RTClib.h"
+#include <DS3232RTC.h>        //http://github.com/JChristensen/DS3232RTC
+#include <Time.h>             //http://playground.arduino.cc/Code/Time
+#include <Wire.h>             //http://arduino.cc/en/Reference/Wire
 
 // define something
 #define LED_PIN 6 // LED strip pin
@@ -47,9 +49,6 @@
 
 // init LED Stripe
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(60, LED_PIN, NEO_GRB + NEO_KHZ800);
-
-// init RTC
-RTC_DS1307 rtc;
 
 // default mode is clock mode
 uint8_t mode = 0;
@@ -59,7 +58,7 @@ uint8_t fader_count = 0;
 uint8_t alert_count = 0;
 
 // Daylight Saving Time
-uint8_t  dst = 0;
+boolean  dst = 0;
 
 // Init RGB Variables
 uint8_t red = 0;
@@ -86,34 +85,28 @@ boolean lastState = 1;
 
 uint8_t alert = 0;
 
-// Init global Date
-DateTime now;
-
 // initialize everything
 void setup() {
   Serial.begin(9600);
   strip.begin();
   strip.setBrightness(192);       // Dimmer
   strip.show();
-  Wire.begin();
-  rtc.begin();
-  if (! rtc.isrunning()) {
-    Serial.println("RTC is NOT running!");
-  }
 
-  boolean setTime = 1;
+  setSyncProvider(RTC.get);   // the function to get the time from the RTC
+  if (timeStatus() != timeSet)
+    Serial.println("Unable to sync with the RTC");
+  else
+    Serial.println("RTC has set the system time");
 
-  if ( setTime == 1 ) {
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    Serial.println(DateTime(F(__DATE__), F(__TIME__)));
-  }
-  
+  //boolean setTime = 0;
+  //if ( setTime == 1 ) {
+  //  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  //  //Serial.println(DateTime(F(__DATE__), F(__TIME__)));
+  //}
+
   pinMode(SQ_PIN, INPUT);
-  rtc.writeSqwPinMode(SquareWave1HZ);   // Set SQ to 1HZ
-  now = rtc.now();
-  DaylightSavingTime();                 // have we DaylightSavingTime?
-  pinMode(SQ_PIN, INPUT);
-
+  RTC.squareWave(SQWAVE_1_HZ);
+  setSyncProvider(RTC.get);   // the function to get the time from the RTC
 }
 
 // main loop
@@ -143,10 +136,10 @@ void loop() {
 
   // alert - overrides everything
   if (alert == 1) {
-    drawCycle((fader_count/4.25), strip.Color(255, 255, 0));
+    drawCycle((fader_count / 4.25), strip.Color(255, 255, 0));
   }
   if (alert == 2) {
-    drawCycle((fader_count/4.25), strip.Color(255, 0, 0));
+    drawCycle((fader_count / 4.25), strip.Color(255, 0, 0));
   }
 
   // redraw if needed
@@ -164,15 +157,11 @@ void clockMode() {
 
   if ((sqState == 0) && (lastState == 1)) {
     fader_count = 0;
-    now = rtc.now();
-    analoghour = now.hour();
-    analogminute = now.minute();
-    analogsecond = now.second();
+    setSyncProvider(RTC.get);   // the function to get the time from the RTC
+    analoghour = hour();
+    analogminute = minute();
+    analogsecond = second();
     lastanalogsecond = pixelCheck(analogsecond - 1);
-
-    if (((analoghour == 2) || (analoghour == 3)) && analogminute == 0 &&  analogsecond == 0) {
-      DaylightSavingTime();
-    }
 
     //analoghour = ((analoghour + dst) % 12);
     analoghour = ((analoghour) % 12);
@@ -236,7 +225,7 @@ void clockMode() {
   green = fader_count;
   blue = 0;
 
-  if ((now.second() % 5) == 0) {   // make sure 5 Minute is brighter
+  if ((second() % 5) == 0) {   // make sure 5 Minute is brighter
     blue = 15;
     red = 15;
     if (( 15 + green ) <= 255 ) {
@@ -388,38 +377,5 @@ uint32_t Wheel(byte WheelPos) {
   else {
     WheelPos -= 170;
     return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
-  }
-}
-
-/******************************************************************************************/
-/***  Determine the Daylight Saving Time DST. In Germany it is the last Sunday in March and in October  ***/
-/***  In March at 2:00am the time will be turned forward to 3:00am and in  ***/
-/***  October at 3:00am it will be turned back to 2:00am and repeated as 2A and 2B  ***/
-/******************************************************************************************/
-void DaylightSavingTime() {
-  /***    Generally checking the full month and determine the DST flag is an easy job  ***/
-  if ( now.month() <= 2 || now.month() >= 11) {
-    dst = 0;                                   // Winter months
-  }
-  if (now.month() >= 4 && now.month() <= 9) {
-    dst = 1;                                    // Summer months
-  }
-  if ((now.month() == 3) && (now.day() - now.dayOfWeek() >= 25)) {
-    if (now.hour() >= 3 - 1) { // MESZ – 1 hour
-      dst = 1;
-    }
-  }
-  /***  Still summer months time DST beginning of October, so easy to determine  ***/
-  if (now.month() == 10 && now.day() - now.dayOfWeek() < 25) {
-    dst = 1;    // Summer months anyway until 24th of October
-  }
-  /***  Test the begin of the winter time in October and set DST = 0  ***/
-  if (now.month() == 10 && now.day() - now.dayOfWeek() >= 25) {     // Test the begin of the winter time
-    if (now.hour() >= 3 - 1) { // -1 since the RTC is running in GMT+1 only
-      dst = 0;
-    }
-    else {
-      dst = 1;
-    }
   }
 }
