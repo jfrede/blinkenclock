@@ -1,7 +1,6 @@
-
 /*
  * blinkenclock - multiprupose LED wall clock
- * version 1.0
+ * version 1.3
  * Copyright by Bjoern Knorr 2013
  *
  * https://github.com/jfrede/blinkenclock
@@ -32,9 +31,9 @@
  * 06 Jun 2015 - Change Set Clock
  * 07 Jun 2015 - Reimplement Alarm
  * 20 Sep 2015 - Use DS3232RTC
+ * 28 Okt 2015 - Reimplement DaylightSavingTime
 
  * todo: Fancy animation for Noon and Midnight
- *       Make set RTC working on non initiated RTC
  *
  * */
 
@@ -107,6 +106,7 @@ void setup() {
   pinMode(SQ_PIN, INPUT);
   RTC.squareWave(SQWAVE_1_HZ);
   setSyncProvider(RTC.get);   // the function to get the time from the RTC
+  DaylightSavingTime();
 }
 
 // main loop
@@ -156,14 +156,14 @@ void clockMode() {
   sqState = digitalRead(SQ_PIN);
 
   if ((sqState == 0) && (lastState == 1)) {
-    fader_count = 0;
     setSyncProvider(RTC.get);   // the function to get the time from the RTC
+    fader_count = 0;
     analoghour = hour();
     analogminute = minute();
     analogsecond = second();
     lastanalogsecond = pixelCheck(analogsecond - 1);
 
-    //analoghour = ((analoghour + dst) % 12);
+    analoghour = ((analoghour + dst) % 12);
     analoghour = ((analoghour) % 12);
     analoghour = analoghour * 5 + (analogminute / 12);
 
@@ -184,6 +184,9 @@ void clockMode() {
   }
 
   if (analogminute == 0 && analogsecond == 0) {     // every Hour blink red
+    if (fader_count = 1) {                     // Calculate DST every hour
+      DaylightSavingTime();
+    }
     if ( fader_count <= 127 ) {
       red = fader_count;
     }
@@ -377,5 +380,39 @@ uint32_t Wheel(byte WheelPos) {
   else {
     WheelPos -= 170;
     return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+  }
+}
+
+
+/******************************************************************************************/
+/***  Determine the Daylight Saving Time DST. In Germany it is the last Sunday in March and in October  ***/
+/***  In March at 2:00am the time will be turned forward to 3:00am and in  ***/
+/***  October at 3:00am it will be turned back to 2:00am and repeated as 2A and 2B  ***/
+/******************************************************************************************/
+void DaylightSavingTime() {
+  /***    Generally checking the full month and determine the DST flag is an easy job  ***/
+  if ( month() <= 2 || month() >= 11) {
+    dst = 0;                                   // Winter months
+  }
+  if (month() >= 4 && month() <= 9) {
+    dst = 1;                                    // Summer months
+  }
+  if ((month() == 3) && (day() - (weekday()-1) >= 25)) {
+    if (hour() >= 3 - 1) { // MESZ – 1 hour
+      dst = 1;
+    }
+  }
+  /***  Still summer months time DST beginning of October, so easy to determine  ***/
+  if (month() == 10 && day() - (weekday()-1) < 25) {
+    dst = 1;    // Summer months anyway until 24th of October
+  }
+  /***  Test the begin of the winter time in October and set DST = 0  ***/
+  if (month() == 10 && day() - (weekday()-1) >= 25) {     // Test the begin of the winter time
+    if (hour() >= 3 - 1) { // -1 since the RTC is running in GMT+1 only
+      dst = 0;
+    }
+    else {
+      dst = 1;
+    }
   }
 }
