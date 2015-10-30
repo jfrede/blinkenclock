@@ -164,7 +164,6 @@ void clockMode() {
     lastanalogsecond = pixelCheck(analogsecond - 1);
 
     analoghour = ((analoghour + dst) % 12);
-    analoghour = ((analoghour) % 12);
     analoghour = analoghour * 5 + (analogminute / 12);
 
     lastanaloghour = pixelCheck(analoghour - 1);
